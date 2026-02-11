@@ -1,4 +1,4 @@
-#include "MapAnalyzer.hpp"
+#include "map_analyzer.hpp"
 #include "game.hpp"
 
 #include <cmath>

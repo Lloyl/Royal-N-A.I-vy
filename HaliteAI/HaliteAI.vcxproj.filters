@@ -42,7 +42,10 @@
     <ClCompile Include="..\MyBot.cpp">
       <Filter>Fichiers sources</Filter>
     </ClCompile>
-    <ClCompile Include="MapAnalyzer.cpp">
+    <ClCompile Include="map_analyzer.cpp">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
+    <ClCompile Include="navigation_system.cpp">
       <Filter>Fichiers sources</Filter>
     </ClCompile>
   </ItemGroup>
@@ -92,10 +95,10 @@
     <ClInclude Include="..\hlt\types.hpp">
       <Filter>Fichiers d%27en-tête</Filter>
     </ClInclude>
-    <ClInclude Include="MapAnalyzer.hpp">
+    <ClInclude Include="map_analyzer.hpp">
       <Filter>Fichiers d%27en-tête</Filter>
     </ClInclude>
-    <ClInclude Include="NavigationSystem.hpp">
+    <ClInclude Include="navigation_system.hpp">
       <Filter>Fichiers d%27en-tête</Filter>
     </ClInclude>
   </ItemGroup>

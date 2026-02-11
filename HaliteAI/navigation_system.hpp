@@ -3,7 +3,7 @@
 #include "game_map.hpp"
 #include "position.hpp"
 #include "types.hpp"
-#include "MapAnalyzer.hpp"
+#include "map_analyzer.hpp"
 
 #include <vector>
 #include <map>

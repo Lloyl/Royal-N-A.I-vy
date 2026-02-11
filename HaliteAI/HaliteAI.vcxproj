@@ -157,7 +157,8 @@
     <ClCompile Include="..\hlt\player.cpp" />
     <ClCompile Include="..\hlt\ship.cpp" />
     <ClCompile Include="..\MyBot.cpp" />
-    <ClCompile Include="MapAnalyzer.cpp" />
+    <ClCompile Include="map_analyzer.cpp" />
+    <ClCompile Include="navigation_system.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\hlt\command.hpp" />
@@ -175,8 +176,8 @@
     <ClInclude Include="..\hlt\ship.hpp" />
     <ClInclude Include="..\hlt\shipyard.hpp" />
     <ClInclude Include="..\hlt\types.hpp" />
-    <ClInclude Include="MapAnalyzer.hpp" />
-    <ClInclude Include="NavigationSystem.hpp" />
+    <ClInclude Include="map_analyzer.hpp" />
+    <ClInclude Include="navigation_system.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
