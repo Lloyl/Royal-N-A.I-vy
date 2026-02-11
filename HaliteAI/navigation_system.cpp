@@ -75,4 +75,78 @@ namespace hlt {
 
 		return path;
 	}
+
+	std::vector<Position> NavigationSystem::find_path(const Position& from, Position& to, bool avoid_ennemies = false) {
+		/**
+		* A*
+		*/
+		if (from == to) {
+			return{ from };
+		}
+		// priority queue, sorted node by growinf f_cost
+		std::priority_queue<PathNode, std::vector<PathNode>, PathNodeCompare> open_set;
+		// all previously visited location
+		std::set<Position> closed_set;
+		// map of all unexplored node
+		std::map<Position, PathNode> all_nodes;
+
+		//Starting Node
+		PathNode start_node(from, 0, calculate_heuristic(from, to), Position(-1, -1));
+		open_set.push(start_node);
+		all_nodes[from] = start_node;
+
+		int max_iteration = map->width * map->height;
+		int iteration = 0;
+
+		while (!open_set.empty() && iteration < max_iteration) {
+			iteration++;
+
+			PathNode current = open_set.top();
+			open_set.pop();
+
+			// Ignore if already visited
+			if (closed_set.find(current.position) != closed_set.end()) {
+				continue;
+			}
+
+			closed_set.insert(current.position);
+			
+			// if arrived at destination
+			if (current.position == to) {
+				return reconstruct_path(all_nodes, from, to);
+			}
+
+			std::vector<Position> neighbours = get_neighbours(current.position);
+
+			for (const Position& neighbour : neighbours) {
+				if (closed_set.find(neighbour) != closed_set.end()) {
+					continue;
+				}
+
+				if (avoid_ennemies && !is_position_safe(neighbour)) {
+					continue;
+				}
+
+				int move_cost = calculate_move_cost(current.position, neighbour);
+				int tentative_g_cost = current.g_cost + move_cost;
+
+				// check if better path to neigbour already exist
+				auto existing = all_nodes.find(neighbour);
+				if (existing != all_nodes.end() && tentative_g_cost >= existing->second.g_cost) {
+					continue;
+				}
+
+				int h_cost = calculate_heuristic(neighbour, to);
+				PathNode neighbour_node(neighbour, tentative_g_cost, h_cost, current.position);
+
+				open_set.push(neighbour_node);
+				all_nodes[neighbour] = neighbour_node;
+			}
+
+		}
+
+		return { from, to };
+	}
+
+
 }
