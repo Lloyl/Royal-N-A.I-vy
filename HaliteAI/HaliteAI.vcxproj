@@ -160,6 +160,7 @@
     <ClCompile Include="..\hlt\player.cpp" />
     <ClCompile Include="..\hlt\ship.cpp" />
     <ClCompile Include="..\MyBot.cpp" />
+    <ClCompile Include="Colonia.cpp" />
     <ClCompile Include="map_analyzer.cpp" />
     <ClCompile Include="navigation_system.cpp" />
   </ItemGroup>
