@@ -76,6 +76,7 @@ namespace hlt {
 		
 		int calculate_heuristic(const Position& from, const Position& to) const;
 		int calculate_move_cost(const Position& current, const Position& next) const;
+		std::vector<Position> reconstruct_path(const std::map<Position, PathNode>& nodes, const Position& start, const Position& end) const;
 		std::vector<Position> get_neighbours(const Position& pos) const;
 		bool is_position_safe(const Position& pos) const;
 	};

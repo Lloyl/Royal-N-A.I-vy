@@ -57,6 +57,7 @@ namespace hlt {
 		bool is_zone_contested(const Position& pos, int radius = 5) const;
 		int calculate_travel_cost(const Position& from, const Position& to) const;
 		std::vector<Position> get_position_in_radius(const Position& center, int radius) const;
+		int calculate_distance_const(const Position& source, const Position& target) const;
 
 	private:
 		void compute_halite_density();
@@ -64,7 +65,6 @@ namespace hlt {
 		void detect_clusters();
 		void bfs_from_dropoff(const Position& dropoff); // bfs -> breadth-first-search
 		void update_enemy_position(Game& game);
-		int calculate_distance_const(const Position& source, const Position& target) const;
 		Position normalize_position(int x, int y) const; //rewrite function since I cannot use the one in game_map
 	};
 }
