@@ -47,6 +47,15 @@ namespace hlt {
 
 	};
 
+	struct ShipMovementPlan {
+		std::shared_ptr<Ship> ship;
+		Position destination;
+		int priority;
+
+		ShipMovementPlan() : ship(nullptr), destination(0,0), priority(0){}
+		ShipMovementPlan(std::shared_ptr<Ship>s, Position dest, int prio) : ship(s), destination(dest), priority(prio) {}
+	};
+
 	struct NavigationSystem {
 		GameMap* map;
 		MapAnalyzer* analyzer;
@@ -54,6 +63,7 @@ namespace hlt {
 		std::map<Position, CellReservation> reserved_cells;
 		std::map<EntityId, Direction> planned_moves;
 		std::map<EntityId, Position> ship_positions;
+		std::vector<ShipMovementPlan> pending_plans;
 
 		NavigationSystem(GameMap* game_map, MapAnalyzer* analyzer);
 	
@@ -62,8 +72,14 @@ namespace hlt {
 
 		void update_ship_position(const Game& game);
 		
-		std::vector<Position>find_path(const Position& from, Position& to, bool avoid_ennemies = false);
+		void add_ship_plan(const std::shared_ptr<Ship>& ship, const Position& destination, int priority = 0);
 
+		std::map<EntityId, Direction> execute_all_plans(); //execute order 66
+
+		std::vector<Position>find_path(const Position& from, const Position& to, bool avoid_ennemies = false);
+		
+		Direction navigate_ship(const std::shared_ptr<Ship>& ship, const Position& destination, int priority = 0);
+		
 		bool is_cell_available(const Position& pos, EntityId, int priority) const;
 
 		bool reserve_cell(const Position& pos, EntityId ship_id, int priority, const Position& destination);

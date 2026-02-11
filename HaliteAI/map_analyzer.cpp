@@ -220,6 +220,7 @@ namespace hlt {
 	}
 
 	int MapAnalyzer::get_distance_to_dropoff(const Position& pos) const {
+		// give distance to nearest dropoff
 		auto it = cell_data.find(pos);
 		return (it != cell_data.end()) ? it->second.distance_to_nearest_dropoff : 0;
 	}
