@@ -9,7 +9,7 @@ using namespace hlt;
 namespace hlt {
 	MapAnalyzer::MapAnalyzer(const GameMap* game_map) : map(game_map), 
 		map_width(game_map->width), map_height(game_map->height),
-		last_cluster_update_turn(-1),cluster_update_frequancy(5){ }
+		last_cluster_update_turn(-1),cluster_update_frequency(5){ }
 
 	void MapAnalyzer::update(Game& game){
 		/**Update map info when called

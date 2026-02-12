@@ -6,7 +6,7 @@
 #include <cmath>
 
 namespace hlt {
-	NavigationSystem::NavigationSystem(GameMap* game_map, MapAnalyzer* analyzer) : map(game_map), analyzer(analyzer){
+	NavigationSystem::NavigationSystem(GameMap* game_map, MapAnalyzer* analyzer, int cache_validity_turn, int current_turn) : map(game_map), analyzer(analyzer), cache_validity_turns(5), current_turn(-1){
 	}
 
 	void NavigationSystem::reset_turn() {
@@ -83,6 +83,17 @@ namespace hlt {
 		if (from == to) {
 			return{ from };
 		}
+
+		PathCacheKey key{ from, to };
+		auto cached = path_cache.find(key);
+
+		if (cached != path_cache.end()) {
+			int turn_since_calcualtion = current_turn - cached->second.turn_calculated;
+
+			if (turn_since_calcualtion < cache_validity_turns) {
+				return cached->second.path;
+			}
+		}
 		// priority queue, sorted node by growinf f_cost
 		std::priority_queue<PathNode, std::vector<PathNode>, PathNodeCompare> open_set;
 		// all previously visited location
@@ -144,8 +155,10 @@ namespace hlt {
 			}
 
 		}
+		std::vector<Position> path = { from, to };
+		path_cache[key] = CachedPath{ path, current_turn, 0 };
 
-		return { from, to };
+		return path;
 	}
 
 	bool NavigationSystem::is_cell_available(const Position& pos, EntityId ship_id, int priority) const {

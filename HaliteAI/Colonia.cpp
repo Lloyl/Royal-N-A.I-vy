@@ -46,6 +46,7 @@ int main(int argc, char* argv[]) {
 
         analyzer.update(game);
         nav_system.reset_turn();
+        nav_system.set_current_turn(game.my_id);
         nav_system.update_ship_position(game);
 
         LOG("Ships:" + to_string(me->ships.size()) + "| Halite: " + to_string(me->halite))

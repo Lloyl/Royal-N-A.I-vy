@@ -25,9 +25,10 @@ namespace hlt {
 		int f_cost;			//g_cost + h_cost
 		Position parent;
 
-		PathNode() : position(0,0), g_cost(0), h_cost(0), f_cost(0), parent(-1, -1){}
+		PathNode() : position(0, 0), g_cost(0), h_cost(0), f_cost(0), parent(-1, -1) {}
 		PathNode(Position pos, int g, int h, Position pos2) : position(pos), g_cost(g), h_cost(h),
-			f_cost(g + h), parent(pos2) {}
+			f_cost(g + h), parent(pos2) {
+		}
 
 	};
 
@@ -42,7 +43,7 @@ namespace hlt {
 		int priority;
 		Position destination;
 
-		CellReservation() : ship_id(-1), priority(0), destination(0,0){}
+		CellReservation() : ship_id(-1), priority(0), destination(0, 0) {}
 		CellReservation(EntityId id, int prio, Position dest) : ship_id(id), priority(prio), destination(dest) {}
 
 	};
@@ -52,8 +53,26 @@ namespace hlt {
 		Position destination;
 		int priority;
 
-		ShipMovementPlan() : ship(nullptr), destination(0,0), priority(0){}
+		ShipMovementPlan() : ship(nullptr), destination(0, 0), priority(0) {}
 		ShipMovementPlan(std::shared_ptr<Ship>s, Position dest, int prio) : ship(s), destination(dest), priority(prio) {}
+	};
+
+	struct PathCacheKey {
+		Position from;
+		Position to;
+
+		bool operator<(const PathCacheKey& other)const{
+			if (from.x != other.from.x) return from.x < other.from.x;
+			if (from.y != other.from.y) return from.y < other.from.y;
+			if (to.x != other.to.x) return to.x < other.to.x;
+			return to.y < other.to.y;
+		}
+	};
+
+	struct CachedPath {
+		std::vector<Position> path;
+		int turn_calculated;
+		int cost;
 	};
 
 	struct NavigationSystem {
@@ -64,15 +83,20 @@ namespace hlt {
 		std::map<EntityId, Direction> planned_moves;
 		std::map<EntityId, Position> ship_positions;
 		std::vector<ShipMovementPlan> pending_plans;
+		std::map<PathCacheKey, CachedPath> path_cache;
 
-		NavigationSystem(GameMap* game_map, MapAnalyzer* analyzer);
+		int cache_validity_turns;
+		int current_turn;
+
+		NavigationSystem(GameMap* game_map, MapAnalyzer* analyzer, int cache_validity_turns, int current_turn);
 	
-
 		void reset_turn();
 
 		void update_ship_position(const Game& game);
 		
 		void add_ship_plan(const std::shared_ptr<Ship>& ship, const Position& destination, int priority = 0);
+
+		void set_current_turn(int turn) { current_turn = turn; }
 
 		std::map<EntityId, Direction> execute_all_plans(); //execute order 66
 
