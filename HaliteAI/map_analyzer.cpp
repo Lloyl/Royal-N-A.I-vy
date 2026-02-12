@@ -179,7 +179,7 @@ namespace hlt {
 		*/ 
 		clusters.clear();
 
-		const int cluster_size = 8;
+		const int cluster_size = 3;
 
 		for (int c_y = 0; c_y < map_height; c_y += cluster_size) {
 			for (int c_x = 0; c_x < map_width; c_x += cluster_size) {

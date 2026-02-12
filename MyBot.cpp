@@ -34,7 +34,7 @@ int main(int argc, char* argv[]) {
 
     LOG("Map Analyzer and NavigationSystem initialized")
 
-        game.ready("Colonia");
+        game.ready("AAAAAAAAA");
 
     LOG("Colonia succesffully created. ID :" + to_string(game.my_id));
 
@@ -103,7 +103,7 @@ int main(int argc, char* argv[]) {
                 if (!rich_clusters.empty()) {
                     int cluster_index = ship_index % min(3, (int)rich_clusters.size());
                     destination = rich_clusters[cluster_index].center;
-                    LOG("Ship " + to_string(ship->id) + "Collecting at cluster " + to_string(cluster_index))
+                    LOG("Ship " + to_string(ship->id) + " Collecting at cluster " + to_string(cluster_index) + " Coordinates : " + to_string(destination.x) + " " + to_string(destination.y) + " Containgning : " + to_string(rich_clusters[cluster_index].total_halite))
                 }
                 else {
                     destination = ship->position;
@@ -165,7 +165,7 @@ int main(int argc, char* argv[]) {
 
         auto total_time = chrono::duration_cast<chrono::milliseconds>(after_phase4 - turn_start);
 
-        LOG("Phase4 time: " + to_string(phase4_time) + "ms / 2000ms")
+        LOG("Total time: " + to_string(phase4_time) + "ms / 2000ms")
 
     }
 
