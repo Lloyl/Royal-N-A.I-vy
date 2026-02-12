@@ -127,7 +127,7 @@ namespace hlt {
 		/**
 		* @brief Update the current turn number
 		*/
-		void set_current_turn(int turn) { current_turn = turn; }
+		void set_current_turn(int turn);
 		/**
 		* @brief Clear old cache path values 
 		*/
