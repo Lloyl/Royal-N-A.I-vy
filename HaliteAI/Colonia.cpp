@@ -30,7 +30,7 @@ int main(int argc, char* argv[]) {
     Game game;
 
     MapAnalyzer analyzer(game.game_map.get());
-    NavigationSystem nav_system(game.game_map.get(), &analyzer);
+    NavigationSystem nav_system(game.game_map.get(), &analyzer, 5, -1);
 
     LOG("Map Analyzer and NavigationSystem initialized")
 
@@ -55,7 +55,7 @@ int main(int argc, char* argv[]) {
         LOG("Analyzer time; " + to_string(analyzer_time) + "ms")
 
         nav_system.reset_turn();
-        nav_system.set_current_turn(game.my_id);
+        nav_system.set_current_turn(game.turn_number);
         nav_system.update_ship_position(game);
 
         LOG("Ships:" + to_string(me->ships.size()) + "| Halite: " + to_string(me->halite))
