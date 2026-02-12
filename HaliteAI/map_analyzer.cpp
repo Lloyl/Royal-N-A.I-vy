@@ -9,7 +9,7 @@ using namespace hlt;
 namespace hlt {
 	MapAnalyzer::MapAnalyzer(const GameMap* game_map) : map(game_map), 
 		map_width(game_map->width), map_height(game_map->height),
-		last_full_update_turn(-1),
+		last_dropoff_update_turn(-1),
 		last_cluster_update_turn(-1),
 		last_enemy_update_turn(-1)
 	{ }
@@ -28,6 +28,60 @@ namespace hlt {
 
 	}
 
+	void MapAnalyzer::update_enemies(Game& game) {
+		enemy_ship_positions.clear();
+
+		for (const auto& player_pair : game.players) {
+			PlayerId player_id = player_pair->id;
+
+			if (player_id == game.my_id) {
+				continue;
+			}
+
+			std::vector<Position> enemy_positions;
+			for (const auto& ship_pair : player_pair->ships) {
+				enemy_positions.push_back(ship_pair.second->position);
+			}
+			enemy_ship_positions[player_id] = enemy_positions;
+		}
+
+		last_enemy_update_turn = game.turn_number;
+	}
+
+	void MapAnalyzer::update_clusters(Game& game) {
+		compute_halite_density();
+		detect_clusters();
+		last_cluster_update_turn = game.turn_number;
+	}
+
+	void MapAnalyzer::update_full(Game& game) {
+		update_dropoffs(game);
+		update_enemies(game);
+		update_clusters(game);
+	}
+
+	void MapAnalyzer::update(Game& game, bool force_cluster, bool force_dropoff) {
+		// enemies are always updated
+		update_enemies(game);
+
+		int current_dropoff_count = 1 + static_cast<int>(game.me->dropoffs.size());
+		int stored_dropoff_count = static_cast<int>(dropoff_positions.size());
+		bool new_dropoff_created = (current_dropoff_count > stored_dropoff_count);
+
+		if (force_dropoff || new_dropoff_created || last_dropoff_update_turn == -1) {
+			update_dropoffs(game);
+		}
+
+		bool should_update_clusters = force_cluster ||
+			last_cluster_update_turn == -1 ||
+			(game.turn_number - last_cluster_update_turn) >= 5;
+		
+		if (should_update_clusters) {
+			update_clusters(game);
+			last_cluster_update_turn = game.turn_number;
+		}
+	}
+	
 	Position MapAnalyzer::normalize_position(int x, int y) const {
 		int norm_x = ((x % map_width) + map_width) % map_width;
 		int norm_y = ((y % map_height) + map_height) % map_height;
@@ -42,27 +96,25 @@ namespace hlt {
 		*   halite_density average Halite value in a 5x5 zone centered on the cell
 		* O (width x height x 25)
 		*/
-		cell_data.clear();
+		const int radius = 2;
 
 		for (int y = 0; y < map_height; y++) {
 			for (int x = 0; x < map_width; x++) {
 				Position pos(x, y);
-				CellInfo info;
-				info.halite_amount = map->cells[x][y].halite;
 
 				int total_halite = 0;
 				int cell_count = 0;
 
-				for (int dy = -2; dy <= 2; ++dy) {
-					for (int dx = 2; dx <= 2; ++dx) {
+				for (int dy = -radius; dy <= radius; ++dy) {
+					for (int dx = radius; dx <= radius; ++dx) {
 						Position normalized_neighbour = normalize_position(x + dx, y + dy);
 						total_halite += map->cells[normalized_neighbour.y][normalized_neighbour.x].halite;
 						cell_count++;
 					}
 				}
-
-				info.halite_density = static_cast<double>(total_halite) / cell_count;
-				cell_data[pos] = info;
+				auto& data = cell_data[pos];
+				data.halite_amount = map->cells[y][x].halite;
+				data.halite_density = static_cast<double>(total_halite) / cell_count;
 			}
 		}
 	}
@@ -84,7 +136,7 @@ namespace hlt {
 			Position current = to_visit.front();
 			to_visit.pop();
 
-			int current_dist = distances[current];
+			int current_distance = distances[current];
 			int current_cost = costs[current];
 
 			std::vector<Position> neighbours = {
@@ -96,30 +148,24 @@ namespace hlt {
 
 			for (const Position& neighbour : neighbours) {
 				if (distances.find(neighbour) == distances.end()) {
+					int new_distance = current_distance + 1;
 					int move_cost = static_cast<int>(
 						std::round(map->cells[current.y][current.x].halite * 0.1)
 						);
-					distances[neighbour] = current_dist + 1;
-					costs[neighbour] = current_cost + move_cost;
+					int new_cost = current_cost + move_cost;
+					
+					distances[neighbour] = new_distance;
+					costs[neighbour] = new_cost;
+					
 					to_visit.push(neighbour);
+
+					auto& data = cell_data[neighbour];
+					if (new_distance < data.distance_to_nearest_dropoff) {
+						data.distance_to_nearest_dropoff = new_distance;
+						data.cost_to_nearest_dropoff = new_cost;
+						data.nearest_dropoff = dropoff;
+					}
 				}
-			}
-		}
-		
-		for (const auto& entry : distances) {
-			Position pos = entry.first;
-			int dist = entry.second;
-			int cost = costs[pos];
-
-			if (cell_data.find(pos) == cell_data.end()) {
-				cell_data[pos] = CellInfo();
-			}
-
-			if (cell_data[pos].distance_to_nearest_dropoff == 0 ||
-				dist < cell_data[pos].distance_to_nearest_dropoff) {
-				cell_data[pos].distance_to_nearest_dropoff = dist;
-				cell_data[pos].cost_to_nearest_dropoff = cost;
-				cell_data[pos].nearest_dropoff = dropoff;
 			}
 		}
 	}
@@ -135,15 +181,15 @@ namespace hlt {
 
 		const int cluster_size = 8;
 
-		for (int cy = 0; cy < map_height; cy += cluster_size) {
-			for (int cx = 0; cx < map_width; cx += cluster_size) {
+		for (int c_y = 0; c_y < map_height; c_y += cluster_size) {
+			for (int c_x = 0; c_x < map_width; c_x += cluster_size) {
 				HaliteCluster cluster;
 				int total_halite = 0;
 				int cell_count = 0;
 
-				for (int dy = 0;dy < cluster_size && cy + dy < map_height; ++dy) {
-					for (int dx = 0; dx < cluster_size && cx + dx < map_width; ++dx) {
-						Position pos(cx + dx, cy + dy);
+				for (int y = c_y;y < std::min(c_y + cluster_size, map_height); ++y) {
+					for (int x = c_x;x < std::min(c_x + cluster_size, map_width); ++x) {
+						Position pos(x,y);
 						int halite = map->cells[pos.y][pos.x].halite;
 						total_halite += halite;
 						cell_count++;
@@ -151,13 +197,11 @@ namespace hlt {
 					}
 				}
 
-				if (total_halite > 0) {
-					cluster.center = Position(cx + cluster_size / 2, cy + cluster_size / 2);
-					cluster.total_halite = total_halite;
-					cluster.avg_density = static_cast<double> (total_halite) / cell_count;
+				cluster.center = Position(c_x + cluster_size / 2, c_y + cluster_size / 2);
+				cluster.total_halite = total_halite;
+				cluster.avg_density = static_cast<double>(total_halite) / cell_count;
 
-					clusters.push_back(cluster);
-				}
+				clusters.push_back(cluster);
 			}
 		}
 
@@ -178,7 +222,7 @@ namespace hlt {
 
 		return toroidal_dx + toroidal_dy;
 	}
-
+	// deprecated ??
 	void MapAnalyzer::update_enemy_position(Game& game) {
 		enemy_ship_positions.clear();
 
@@ -199,12 +243,10 @@ namespace hlt {
 	}
 
 	void MapAnalyzer::compute_distances_and_costs() {
-		/**
-		* Start a breadth first search for each dropoff
-		* Compute distance to nearest dropoff from pos
-		* cost to nearest dropoff from pos
-		* nearest dropoff from pos
-		*/
+		for (auto& pair : cell_data) {
+			pair.second.distance_to_nearest_dropoff = map_height * map_width;
+			pair.second.cost_to_nearest_dropoff = 9999999;
+		}
 		for (const Position& dropoff : dropoff_positions) {
 			bfs_from_dropoff(dropoff);
 		}
@@ -244,18 +286,16 @@ namespace hlt {
 	}
 
 	bool MapAnalyzer::is_zone_contested(const Position& pos, int radius) const {
-		int enemy_count = 0;
-
 		for (const auto& enemy_entry : enemy_ship_positions) {
 			for(const Position& enemy_pos : enemy_entry.second){
 				int distance = calculate_distance_const(pos, enemy_pos);
 
 				if (distance <= radius) {
-					enemy_count++;
+					return true;
 				}
 			}
 		}
-		return enemy_count > 0;
+		return false;
 	}
 
 	int MapAnalyzer::calculate_travel_cost(const Position& from, const Position& to) const {
