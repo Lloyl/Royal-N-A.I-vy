@@ -6,6 +6,7 @@
 
 #include <random>
 #include <ctime>
+#include <chrono>
 
 using namespace std;
 using namespace hlt;
@@ -38,6 +39,8 @@ int main(int argc, char* argv[]) {
     LOG("Colonia succefffully created. ID :" + to_string(game.my_id));
 
     for (;;) {
+        auto turn_start = chrono::high_resolution_clock::now();
+
         game.update_frame();
         shared_ptr<Player> me = game.me;
         unique_ptr<GameMap>& game_map = game.game_map;
@@ -45,16 +48,32 @@ int main(int argc, char* argv[]) {
         LOG("=== Turn" + to_string(game.turn_number) + " ===")
 
         analyzer.update(game);
+
+        auto after_analyzer = chrono::high_resolution_clock::now();
+        auto analyzer_time = chrono::duration_cast<chrono::milliseconds>(after_analyzer - turn_start).count();
+        
+        LOG("Analyzer time; " + to_string(analyzer_time) + "ms")
+
         nav_system.reset_turn();
         nav_system.set_current_turn(game.my_id);
         nav_system.update_ship_position(game);
 
         LOG("Ships:" + to_string(me->ships.size()) + "| Halite: " + to_string(me->halite))
 
+        auto after_navigation = chrono::high_resolution_clock::now();
+        auto navigation_time = chrono::duration_cast<chrono::milliseconds>(after_navigation - after_analyzer).count();
+
+        LOG("Navigation time; " + to_string(navigation_time) + "ms")
+
         vector<Command> command_queue;
 
         auto rich_clusters = analyzer.get_rich_cluster(1000);
         LOG("Rich clusters found:" + to_string(rich_clusters.size()))
+
+        auto after_cluster = chrono::high_resolution_clock::now();
+        auto cluster_time = chrono::duration_cast<chrono::milliseconds>(after_cluster - after_navigation).count();
+
+        LOG("Cluster finding time; " + to_string(cluster_time) + "ms")
 
         //Phase 1 decision making per ship
         int ship_index = 0;
@@ -85,10 +104,20 @@ int main(int argc, char* argv[]) {
             ship_index++;
         }
 
+        auto after_phase1 = chrono::high_resolution_clock::now();
+        auto phase1_time = chrono::duration_cast<chrono::milliseconds>(after_phase1 - after_cluster).count();
+
+        LOG("Phase1 time; " + to_string(phase1_time) + "ms")
+
         //phase 2 execute all orders
         LOG("Executing navigation plans...")
 
         auto moves = nav_system.execute_all_plans();
+
+        auto after_phase2 = chrono::high_resolution_clock::now();
+        auto phase2_time = chrono::duration_cast<chrono::milliseconds>(after_phase2 - after_phase1).count();
+
+        LOG("Phase2 time; " + to_string(phase2_time) + "ms")
 
         //Phase 3 Create Commands
         for (const auto& ship_iterator : me->ships) {
@@ -103,6 +132,11 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        auto after_phase3 = chrono::high_resolution_clock::now();
+        auto phase3_time = chrono::duration_cast<chrono::milliseconds>(after_phase3 - after_phase2).count();
+
+        LOG("Phase3 time; " + to_string(phase3_time) + "ms")
+
         //Phase 4 spawn ships
         if (game.turn_number <= 250 && me->halite >= constants::SHIP_COST && !game_map->at(me->shipyard)->is_occupied()) {
             LOG("Spawing new ship")
@@ -113,6 +147,14 @@ int main(int argc, char* argv[]) {
             break;
         }
 
+        auto after_phase4 = chrono::high_resolution_clock::now();
+        auto phase4_time = chrono::duration_cast<chrono::milliseconds>(after_phase4 - after_phase3).count();
+
+        LOG("Phase4 time: " + to_string(phase4_time) + "ms")
+
+        auto total_time = chrono::duration_cast<chrono::milliseconds>(after_phase4 - turn_start);
+        
+        LOG("Phase4 time: " + to_string(phase4_time) + "ms / 2000ms")
             
     }
 

@@ -84,6 +84,12 @@ namespace hlt {
 			return{ from };
 		}
 
+		int distance = analyzer->calculate_distance_const(from, to);
+
+		if (distance > 15) {
+			return { from, to };
+		}
+
 		PathCacheKey key{ from, to };
 		auto cached = path_cache.find(key);
 
