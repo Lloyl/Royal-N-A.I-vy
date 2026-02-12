@@ -76,7 +76,7 @@ namespace hlt {
 		return path;
 	}
 
-	std::vector<Position> NavigationSystem::find_path(const Position& from, const Position& to, bool avoid_ennemies = false) {
+	std::vector<Position> NavigationSystem::find_path(const Position& from, const Position& to, bool avoid_ennemies) {
 		/**
 		* A*
 		*/

@@ -8,7 +8,8 @@ using namespace hlt;
 
 namespace hlt {
 	MapAnalyzer::MapAnalyzer(const GameMap* game_map) : map(game_map), 
-		map_width(game_map->width), map_height(game_map->height){ }
+		map_width(game_map->width), map_height(game_map->height),
+		last_cluster_update_turn(-1),cluster_update_frequancy(5){ }
 
 	void MapAnalyzer::update(Game& game){
 		/**Update map info when called
@@ -26,9 +27,14 @@ namespace hlt {
 		}
 
 		update_enemy_position(game);
-		compute_distances_and_costs();
-		compute_halite_density();
-		detect_clusters();
+
+		bool should_update_clusters = (game.turn_number - last_cluster_update_turn) >= cluster_update_frequency;
+
+		if (should_update_clusters || last_cluster_update_turn == -1) {
+			compute_distances_and_costs();
+			compute_halite_density();
+			detect_clusters();
+		}
 
 	}
 

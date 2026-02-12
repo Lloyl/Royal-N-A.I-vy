@@ -38,6 +38,8 @@ namespace hlt {
 		const GameMap* map;
 		int map_width;
 		int map_height;
+		int last_cluster_update_turn;
+		int cluster_update_frequency;
 
 		std::map<Position, CellInfo> cell_data;
 		std::vector<HaliteCluster> clusters;
