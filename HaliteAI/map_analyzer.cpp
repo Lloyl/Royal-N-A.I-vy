@@ -9,16 +9,12 @@ using namespace hlt;
 namespace hlt {
 	MapAnalyzer::MapAnalyzer(const GameMap* game_map) : map(game_map), 
 		map_width(game_map->width), map_height(game_map->height),
-		last_cluster_update_turn(-1),cluster_update_frequency(5){ }
+		last_full_update_turn(-1),
+		last_cluster_update_turn(-1),
+		last_enemy_update_turn(-1)
+	{ }
 
-	void MapAnalyzer::update(Game& game){
-		/**Update map info when called
-		* Collect dropoff position 
-		* Collect Enemy boat position
-		* Compute Halite density
-		* Compute distance and cost when moving to dropoff
-		* Compute Hih density halite cluster
-		*/
+	void MapAnalyzer::update_dropoffs(Game& game){
 		dropoff_positions.clear();
 		dropoff_positions.push_back(game.me->shipyard->position);
 
@@ -26,15 +22,9 @@ namespace hlt {
 			dropoff_positions.push_back(dropoff_pair.second->position);
 		}
 
-		update_enemy_position(game);
+		last_dropoff_update_turn = game.turn_number;
 
-		bool should_update_clusters = (game.turn_number - last_cluster_update_turn) >= cluster_update_frequency;
-
-		if (should_update_clusters || last_cluster_update_turn == -1) {
-			compute_distances_and_costs();
-			compute_halite_density();
-			detect_clusters();
-		}
+		compute_distances_and_costs();
 
 	}
 
