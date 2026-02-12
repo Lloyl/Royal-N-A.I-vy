@@ -181,7 +181,7 @@ namespace hlt {
 		/**
 		* @brief Compute ship priority
 		* @param ship Ship
-		* @return Priority (depends on cargo, distance to dropoff, ...)
+		* @return Priority (depends on cargo, distance to dropoff and bonuses)
 		*/
 		int calculate_ship_priority(const std::shared_ptr<Ship>& ship) const;
 

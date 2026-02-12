@@ -6,12 +6,35 @@
 #include <cmath>
 
 namespace hlt {
-	NavigationSystem::NavigationSystem(GameMap* game_map, MapAnalyzer* analyzer, int cache_validity_turn, int current_turn) : map(game_map), analyzer(analyzer), cache_validity_turns(5), current_turn(-1){
+	NavigationSystem::NavigationSystem(GameMap* game_map, MapAnalyzer* analyzer, int cache_validity_turn, int current_turn) 
+		: map(game_map), analyzer(analyzer), cache_validity_turns(5), current_turn(-1){
 	}
 
 	void NavigationSystem::reset_turn() {
 		reserved_cells.clear();
 		planned_moves.clear();
+	}
+
+	void NavigationSystem::set_current_turn(int turn) {
+		current_turn = turn;
+
+		if (turn % 10 == 0) {
+			// clear cache every 10 turns
+			clear_old_cache();
+		}
+	}
+
+	void NavigationSystem::clear_old_cache() {
+		auto it = path_cache.begin();
+		while (it != path_cache.end()) {
+			int age = current_turn - it->second.turn_calculated;
+			if (age > cache_validity_turns) {
+				it = path_cache.erase(it);
+			}
+			else {
+				++it;
+			}
+		}
 	}
 
 	void NavigationSystem::update_ship_position(const Game& game) {
@@ -86,12 +109,13 @@ namespace hlt {
 
 		int distance = analyzer->calculate_distance_const(from, to);
 
-		if (distance > 15) {
+		// if destination is to faraway we use naive navigation 
+		if (distance > map->width /2) {
 			return { from, to };
 		}
 
-		PathCacheKey key{ from, to };
-		auto cached = path_cache.find(key);
+		PathCacheKey cache_key{ from, to };
+		auto cached = path_cache.find(cache_key);
 
 		if (cached != path_cache.end()) {
 			int turn_since_calcualtion = current_turn - cached->second.turn_calculated;
@@ -100,7 +124,8 @@ namespace hlt {
 				return cached->second.path;
 			}
 		}
-		// priority queue, sorted node by growinf f_cost
+		// A*
+		// priority queue, sorted node by growing f_cost
 		std::priority_queue<PathNode, std::vector<PathNode>, PathNodeCompare> open_set;
 		// all previously visited location
 		std::set<Position> closed_set;
@@ -112,11 +137,11 @@ namespace hlt {
 		open_set.push(start_node);
 		all_nodes[from] = start_node;
 
-		int max_iteration = map->width * map->height;
-		int iteration = 0;
+		int max_iterations = max_pathfinding_distance * max_pathfinding_distance;
+		int iterations = 0;
 
-		while (!open_set.empty() && iteration < max_iteration) {
-			iteration++;
+		while (!open_set.empty() && iterations < max_iterations) {
+			iterations++;
 
 			PathNode current = open_set.top();
 			open_set.pop();
@@ -127,10 +152,12 @@ namespace hlt {
 			}
 
 			closed_set.insert(current.position);
-			
+
 			// if arrived at destination
 			if (current.position == to) {
-				return reconstruct_path(all_nodes, from, to);
+				std::vector<Position> path = reconstruct_path(all_nodes, from, to);
+				path_cache[cache_key] = CachedPath(path, current_turn);
+				return path;
 			}
 
 			std::vector<Position> neighbours = get_neighbours(current.position);
@@ -161,29 +188,28 @@ namespace hlt {
 			}
 
 		}
-		std::vector<Position> path = { from, to };
-		path_cache[key] = CachedPath{ path, current_turn, 0 };
-
-		return path;
+		//fall back
+		return { from, to };
 	}
 
 	bool NavigationSystem::is_cell_available(const Position& pos, EntityId ship_id, int priority) const {
-
+		
+		//Cell already occupied by the ship
 		auto ship_pos = ship_positions.find(ship_id);
 		if (ship_pos != ship_positions.end() && ship_pos->second == pos) {
 			return true;
 		}
-
+		// if cell is reserved 
 		auto reservation = reserved_cells.find(pos);
-		if (reservation == reserved_cells.end()) {
+		if (reservation == reserved_cells.end()) { //false if cell is reserved
 			return true;
 		}
 
-		// if space reserved by the ship
+		// if cell reserved by the ship
 		if (reservation->second.ship_id == ship_id) {
 			return true;
 		}
-
+		// if cell reserved by another ship compare priority
 		return priority > reservation->second.priority;
 	}
 
@@ -199,14 +225,17 @@ namespace hlt {
 	int NavigationSystem::calculate_ship_priority(const std::shared_ptr<Ship>& ship) const {
 		int priority = 0;
 
+		//cargo based priority
 		priority += ship->halite / 10;
 
+		//bonus if close to dropoff
 		int distance_to_dropoff = analyzer->get_distance_to_dropoff(ship->position);
-		if (distance_to_dropoff < 5) {
+		if (distance_to_dropoff <= 5) {
 			priority += 50;
 		}
 
-		if (ship->halite > 900) {
+		//bonus if cargo almost full
+		if (ship->halite >= 900) {
 			priority += 100;
 		}
 
@@ -243,7 +272,7 @@ namespace hlt {
 			option.available = is_cell_available(target, ship->id, priority);
 
 			if (dir == Direction::STILL) {
-				// Moving option preferred
+				// Moving option is preferred
 				option.cost = 100;
 			}
 			else {
@@ -275,6 +304,7 @@ namespace hlt {
 		planned_moves[ship->id] = Direction::STILL;
 		return Direction::STILL;
 	}
+
 	void NavigationSystem::add_ship_plan(const std::shared_ptr<Ship>& ship, const Position& destination, int priority) {
 		if (priority == 0) {
 			priority = calculate_ship_priority(ship);
@@ -315,8 +345,8 @@ namespace hlt {
 			return Direction::STILL;
 		}
 
-		bool avoid_ennemies = (ship->halite >= 500); //avoid ennemy if at least half full
-		std::vector<Position> path = find_path(ship->position, destination, avoid_ennemies);
+		bool avoid_enemies = (ship->halite >= 500); //avoid ennemy if at least half full
+		std::vector<Position> path = find_path(ship->position, destination, avoid_enemies);
 
 		if (path.size() > 1) {
 			Position next_pos = path[1];
@@ -331,9 +361,9 @@ namespace hlt {
 			Direction dir = Direction::STILL;
 
 			if (dx == 1) dir = Direction::EAST;
-			if (dx == -1) dir = Direction::WEST;
-			if (dy == 1) dir = Direction::SOUTH;
-			if (dy == -1) dir = Direction::NORTH;
+			else if (dx == -1) dir = Direction::WEST;
+			else if (dy == 1) dir = Direction::SOUTH;
+			else if (dy == -1) dir = Direction::NORTH;
 
 			if (is_cell_available(next_pos, ship->id, priority)) {
 				if (reserve_cell(next_pos, ship->id, priority, destination)) {
