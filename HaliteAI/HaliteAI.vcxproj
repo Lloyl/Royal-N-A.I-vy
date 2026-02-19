@@ -157,6 +157,7 @@
     <ClCompile Include="..\hlt\player.cpp" />
     <ClCompile Include="..\hlt\ship.cpp" />
     <ClCompile Include="..\MyBot.cpp" />
+    <ClCompile Include="annotation_map.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\hlt\command.hpp" />
