@@ -89,7 +89,7 @@
     <ClInclude Include="..\hlt\types.hpp">
       <Filter>Fichiers d%27en-tête</Filter>
     </ClInclude>
-    <ClInclude Include="MapAnalyzer.hpp">
+    <ClInclude Include="annotation_map.hpp">
       <Filter>Fichiers d%27en-tête</Filter>
     </ClInclude>
   </ItemGroup>
