@@ -1,338 +1,365 @@
 #include "annotation_map.hpp"
 #include "constants.hpp"
-#include <queue>
 #include <cmath>
 #include <algorithm>
+#include <queue>
 
 namespace hlt {
 
-    AnnotationMap::AnnotationMap(GameMap* game_map)
-        : map_(game_map)
-    {
-        annotations_.resize(map_->height);
-        for (int y = 0; y < map_->height; ++y) {
-            annotations_[y].resize(map_->width);
-        }
+    AnnotationMap::AnnotationMap(int width, int height)
+        : width_(width), height_(height) {
+        cells_.resize(height, std::vector<CellInfo>(width));
     }
 
-    void AnnotationMap::update(const Game& game) {
-        // Reinitialize (execpt lasting path marking)
-        for (int y = 0; y < map_->height; ++y) {
-            for (int x = 0; x < map_->width; ++x) {
-                auto& cell = annotations_[y][x];
-                cell.distance_to_ally_dropoff = 999;
-                cell.distance_to_nearest_ally = 999;
-                cell.distance_to_nearest_enemy = 999;
-                cell.has_enemy_ship = false;
-                cell.enemy_can_reach_next_turn = false;
-                cell.dominance = 0;
-                cell.attraction = 0.0;
-                cell.is_inspired = false;
+    void AnnotationMap::build(GameMap& game_map,
+        const std::vector<std::shared_ptr<Player>>& players,
+        PlayerId my_id,
+        int turn_number) {
+        // Reset all cells
+        for (auto& row : cells_) {
+            for (auto& cell : row) {
+                cell = CellInfo();
             }
         }
 
-        calculate_distances(game);
-        mark_enemy_positions(game);
-        calculate_dominance(game);
-        calculate_attraction_field(game);
-        calculate_inspiration(game);
-        mark_enemy_reach(game);
-    }
-
-    const CellAnnotation& AnnotationMap::at(const Position& pos) const {
-        return annotations_[pos.y][pos.x];
-    }
-
-    CellAnnotation& AnnotationMap::at(const Position& pos) {
-        return annotations_[pos.y][pos.x];
-    }
-
-    int AnnotationMap::get_dropoff_distance(const Position& pos) const {
-        return annotations_[pos.y][pos.x].distance_to_ally_dropoff;
-    }
-
-    bool AnnotationMap::has_enemy_at(const Position& pos) const {
-        return annotations_[pos.y][pos.x].has_enemy_ship;
-    }
-
-    int AnnotationMap::get_dominance(const Position& pos) const {
-        return annotations_[pos.y][pos.x].dominance;
-    }
-
-    double AnnotationMap::get_attraction(const Position& pos) const {
-        return annotations_[pos.y][pos.x].attraction;
-    }
-
-    bool AnnotationMap::is_cell_inspired(const Position& pos) const {
-        return annotations_[pos.y][pos.x].is_inspired;
-    }
-
-    int AnnotationMap::manhattan_distance(const Position& a, const Position& b) const {
-        return map_->calculate_distance(a, b);
-    }
-
-    std::vector<Position> AnnotationMap::get_neighbors(const Position& pos) const {
-        return {
-            map_->normalize(Position(pos.x, pos.y - 1)),
-            map_->normalize(Position(pos.x, pos.y + 1)),
-            map_->normalize(Position(pos.x + 1, pos.y)),
-            map_->normalize(Position(pos.x - 1, pos.y))
-        };
-    }
-
-    void AnnotationMap::calculate_distances(const Game& game) {
-        /// Dropoff positions
-        std::vector<Position> dropoff_positions;
-        dropoff_positions.push_back(game.me->shipyard->position);
-        for (const auto& dropoff_pair : game.me->dropoffs) {
-            dropoff_positions.push_back(dropoff_pair.second->position);
-        }
-
-        /// Allied ship positions
-        std::vector<Position> ally_positions;
-        for (const auto& ship_pair : game.me->ships) {
-            ally_positions.push_back(ship_pair.second->position);
-        }
-
-        /// Enemy ship positions
-        std::vector<Position> enemy_positions;
-        for (const auto& player : game.players) {
-            if (player->id == game.me->id) continue;
-            for (const auto& ship_pair : player->ships) {
-                enemy_positions.push_back(ship_pair.second->position);
+        // Initialize remaining halite from current map state
+        for (int y = 0; y < height_; ++y) {
+            for (int x = 0; x < width_; ++x) {
+                cells_[y][x].remaining_halite = game_map.at(Position(x, y))->halite;
             }
         }
 
-        /// Compute distances
-        for (int y = 0; y < map_->height; ++y) {
-            for (int x = 0; x < map_->width; ++x) {
+        // Build all annotation layers
+        build_attraction_field(game_map);
+        calculate_dominance(game_map, players, my_id);
+        calculate_inspiration(game_map, players, my_id);
+        mark_enemy_presence(game_map, players, my_id);
+        calculate_distances(game_map, players, my_id);
+        initialize_forbidden_moves(game_map, my_id, static_cast<int>(players.size()));
+    }
+
+    AnnotationMap::CellInfo& AnnotationMap::at(const Position& pos) {
+        Position norm = normalize(pos);
+        return cells_[norm.y][norm.x];
+    }
+
+    const AnnotationMap::CellInfo& AnnotationMap::at(const Position& pos) const {
+        Position norm = normalize(pos);
+        return cells_[norm.y][norm.x];
+    }
+
+    Position AnnotationMap::normalize(const Position& pos) const {
+        int x = ((pos.x % width_) + width_) % width_;
+        int y = ((pos.y % height_) + height_) % height_;
+        return Position(x, y);
+    }
+
+    void AnnotationMap::build_attraction_field(GameMap& game_map,
+        float blur_factor,
+        int threshold) {
+        // Step 1: Copy halite values
+        std::vector<std::vector<float>> halite_map(height_, std::vector<float>(width_));
+        for (int y = 0; y < height_; ++y) {
+            for (int x = 0; x < width_; ++x) {
+                halite_map[y][x] = static_cast<float>(game_map.at(Position(x, y))->halite);
+            }
+        }
+
+        // Step 2: Apply exponential blur
+        std::vector<std::vector<float>> blurred(height_, std::vector<float>(width_, 0.0f));
+        for (int y = 0; y < height_; ++y) {
+            for (int x = 0; x < width_; ++x) {
+                float sum = 0.0f;
+                float weight_sum = 0.0f;
+
+                // Apply blur in a small radius (e.g., 3x3)
+                for (int dy = -1; dy <= 1; ++dy) {
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        Position neighbor = normalize(Position(x + dx, y + dy));
+                        float distance = std::sqrt(static_cast<float>(dx * dx + dy * dy));
+                        float weight = std::pow(blur_factor, distance);
+                        sum += halite_map[neighbor.y][neighbor.x] * weight;
+                        weight_sum += weight;
+                    }
+                }
+
+                blurred[y][x] = sum / weight_sum;
+            }
+        }
+
+        // Step 3: Apply threshold
+        for (int y = 0; y < height_; ++y) {
+            for (int x = 0; x < width_; ++x) {
+                cells_[y][x].attraction = blurred[y][x] >= threshold ? blurred[y][x] : 0.0f;
+            }
+        }
+    }
+
+    void AnnotationMap::calculate_dominance(GameMap& game_map,
+        const std::vector<std::shared_ptr<Player>>& players,
+        PlayerId my_id,
+        int dominance_radius) {
+        // Count ships in radius for each cell
+        for (int y = 0; y < height_; ++y) {
+            for (int x = 0; x < width_; ++x) {
+                Position center(x, y);
+                int allied_count = 0;
+                int enemy_count = 0;
+
+                // Check all cells in radius
+                for (int dy = -dominance_radius; dy <= dominance_radius; ++dy) {
+                    for (int dx = -dominance_radius; dx <= dominance_radius; ++dx) {
+                        int manhattan_dist = std::abs(dx) + std::abs(dy);
+                        if (manhattan_dist > dominance_radius) continue;
+
+                        Position check_pos = normalize(Position(x + dx, y + dy));
+                        const auto* cell = game_map.at(check_pos);
+
+                        if (cell->ship) {
+                            if (cell->ship->owner == my_id) {
+                                allied_count++;
+                            }
+                            else {
+                                enemy_count++;
+                            }
+                        }
+                    }
+                }
+
+                cells_[y][x].allied_dominance = allied_count;
+                cells_[y][x].enemy_dominance = enemy_count;
+                cells_[y][x].dominance_score = allied_count - enemy_count;
+            }
+        }
+    }
+
+    void AnnotationMap::calculate_inspiration(GameMap& game_map,
+        const std::vector<std::shared_ptr<Player>>& players,
+        PlayerId my_id) {
+        if (!constants::INSPIRATION_ENABLED) return;
+
+        for (int y = 0; y < height_; ++y) {
+            for (int x = 0; x < width_; ++x) {
+                Position center(x, y);
+                int enemy_count = 0;
+
+                // Count enemy ships in inspiration radius
+                for (int dy = -constants::INSPIRATION_RADIUS; dy <= constants::INSPIRATION_RADIUS; ++dy) {
+                    for (int dx = -constants::INSPIRATION_RADIUS; dx <= constants::INSPIRATION_RADIUS; ++dx) {
+                        int manhattan_dist = std::abs(dx) + std::abs(dy);
+                        if (manhattan_dist > constants::INSPIRATION_RADIUS) continue;
+
+                        Position check_pos = normalize(Position(x + dx, y + dy));
+                        const auto* cell = game_map.at(check_pos);
+
+                        if (cell->ship && cell->ship->owner != my_id) {
+                            enemy_count++;
+                        }
+                    }
+                }
+
+                cells_[y][x].is_inspired = (enemy_count >= constants::INSPIRATION_SHIP_COUNT);
+            }
+        }
+    }
+
+    void AnnotationMap::mark_enemy_presence(GameMap& game_map,
+        const std::vector<std::shared_ptr<Player>>& players,
+        PlayerId my_id) {
+        // Mark enemy ships
+        for (size_t i = 0; i < players.size(); ++i) {
+            const auto& player = players[i];
+            if (player->id == my_id) continue;
+
+            for (auto it = player->ships.begin(); it != player->ships.end(); ++it) {
+                const auto& ship = it->second;
+                Position pos = ship->position;
+                Position norm = normalize(pos);
+                cells_[norm.y][norm.x].has_enemy_ship = true;
+
+                // Mark accessible cells
+                for (size_t d = 0; d < ALL_CARDINALS.size(); ++d) {
+                    Direction dir = ALL_CARDINALS[d];
+                    Position adjacent = normalize(pos.directional_offset(dir));
+                    cells_[adjacent.y][adjacent.x].enemy_accessible_next_turn = true;
+                }
+                // Enemy can also stay still
+                cells_[norm.y][norm.x].enemy_accessible_next_turn = true;
+            }
+        }
+    }
+
+    void AnnotationMap::calculate_distances(GameMap& game_map,
+        const std::vector<std::shared_ptr<Player>>& players,
+        PlayerId my_id) {
+        // Find my player
+        std::shared_ptr<Player> me;
+        for (size_t i = 0; i < players.size(); ++i) {
+            if (players[i]->id == my_id) {
+                me = players[i];
+                break;
+            }
+        }
+        if (!me) return;
+
+        // Calculate distance to nearest ally, enemy, dropoff
+        for (int y = 0; y < height_; ++y) {
+            for (int x = 0; x < width_; ++x) {
                 Position pos(x, y);
-
-                // Distance to closest dropoff
-                int min_dropoff_dist = 999;
-                for (const Position& dropoff : dropoff_positions) {
-                    min_dropoff_dist = std::min(min_dropoff_dist, manhattan_distance(pos, dropoff));
-                }
-                annotations_[y][x].distance_to_ally_dropoff = min_dropoff_dist;
-
-                /// Distance to closest ally
                 int min_ally_dist = 999;
-                for (const Position& ally : ally_positions) {
-                    if (ally != pos) {
-                        min_ally_dist = std::min(min_ally_dist, manhattan_distance(pos, ally));
-                    }
-                }
-                annotations_[y][x].distance_to_nearest_ally = min_ally_dist;
-
-                /// Distance to closest enemy
                 int min_enemy_dist = 999;
-                for (const Position& enemy : enemy_positions) {
-                    min_enemy_dist = std::min(min_enemy_dist, manhattan_distance(pos, enemy));
+                int min_dropoff_dist = 999;
+
+                // Distance to allied ships
+                for (auto it = me->ships.begin(); it != me->ships.end(); ++it) {
+                    const auto& ship = it->second;
+                    int wrap_x = std::min(std::abs(x - ship->position.x), width_ - std::abs(x - ship->position.x));
+                    int wrap_y = std::min(std::abs(y - ship->position.y), height_ - std::abs(y - ship->position.y));
+                    int dist = wrap_x + wrap_y;
+                    min_ally_dist = std::min(min_ally_dist, dist);
                 }
-                annotations_[y][x].distance_to_nearest_enemy = min_enemy_dist;
-            }
-        }
-    }
 
-    void AnnotationMap::mark_enemy_positions(const Game& game) {
-        for (const auto& player : game.players) {
-            if (player->id == game.me->id) continue;
-
-            for (const auto& ship_pair : player->ships) {
-                Position enemy_pos = ship_pair.second->position;
-                annotations_[enemy_pos.y][enemy_pos.x].has_enemy_ship = true;
-            }
-        }
-    }
-
-    void AnnotationMap::calculate_dominance(const Game& game, int radius) {
-        for (int y = 0; y < map_->height; ++y) {
-            for (int x = 0; x < map_->width; ++x) {
-                Position center(x, y);
-
-                int ally_count = 0;
-                int enemy_count = 0;
-
-                /// Count allies & ennemies within radius
-                for (const auto& ship_pair : game.me->ships) {
-                    if (manhattan_distance(center, ship_pair.second->position) <= radius) {
-                        ally_count++;
+                // Distance to enemy ships
+                for (size_t i = 0; i < players.size(); ++i) {
+                    const auto& player = players[i];
+                    if (player->id == my_id) continue;
+                    for (auto it = player->ships.begin(); it != player->ships.end(); ++it) {
+                        const auto& ship = it->second;
+                        int wrap_x = std::min(std::abs(x - ship->position.x), width_ - std::abs(x - ship->position.x));
+                        int wrap_y = std::min(std::abs(y - ship->position.y), height_ - std::abs(y - ship->position.y));
+                        int dist = wrap_x + wrap_y;
+                        min_enemy_dist = std::min(min_enemy_dist, dist);
                     }
                 }
 
-                for (const auto& player : game.players) {
-                    if (player->id == game.me->id) continue;
+                // Distance to dropoffs (including shipyard)
+                if (me->shipyard) {
+                    int wrap_x = std::min(std::abs(x - me->shipyard->position.x), width_ - std::abs(x - me->shipyard->position.x));
+                    int wrap_y = std::min(std::abs(y - me->shipyard->position.y), height_ - std::abs(y - me->shipyard->position.y));
+                    min_dropoff_dist = wrap_x + wrap_y;
+                }
+                for (auto it = me->dropoffs.begin(); it != me->dropoffs.end(); ++it) {
+                    const auto& dropoff = it->second;
+                    int wrap_x = std::min(std::abs(x - dropoff->position.x), width_ - std::abs(x - dropoff->position.x));
+                    int wrap_y = std::min(std::abs(y - dropoff->position.y), height_ - std::abs(y - dropoff->position.y));
+                    int dist = wrap_x + wrap_y;
+                    min_dropoff_dist = std::min(min_dropoff_dist, dist);
+                }
 
-                    for (const auto& ship_pair : player->ships) {
-                        if (manhattan_distance(center, ship_pair.second->position) <= radius) {
-                            enemy_count++;
+                cells_[y][x].distance_to_nearest_ally = min_ally_dist;
+                cells_[y][x].distance_to_nearest_enemy = min_enemy_dist;
+                cells_[y][x].distance_to_nearest_dropoff = min_dropoff_dist;
+            }
+        }
+    }
+
+    void AnnotationMap::initialize_forbidden_moves(GameMap& game_map, PlayerId my_id, int num_players) {
+        // Find my player's ships
+        for (int y = 0; y < height_; ++y) {
+            for (int x = 0; x < width_; ++x) {
+                const auto* cell = game_map.at(Position(x, y));
+                if (!cell->ship || cell->ship->owner != my_id) continue;
+
+                Position ship_pos(x, y);
+                const auto& info = at(ship_pos);
+
+                int dominance_threshold = (num_players == 2) ? -1 : 0;
+
+                // Check each direction
+                Direction all_dirs[5] = { Direction::NORTH, Direction::SOUTH, Direction::EAST, Direction::WEST, Direction::STILL };
+                for (int d = 0; d < 5; ++d) {
+                    Direction dir = all_dirs[d];
+                    Position target = normalize(ship_pos.directional_offset(dir));
+                    const auto& target_info = at(target);
+
+                    bool is_forbidden = false;
+
+                    // Forbid if enemy can move there and dominance is bad
+                    if (target_info.enemy_accessible_next_turn &&
+                        target_info.dominance_score <= dominance_threshold) {
+                        is_forbidden = true;
+                    }
+
+                    if (is_forbidden) {
+                        set_move_forbidden(ship_pos, dir);
+                    }
+                }
+
+                // If all moves forbidden, allow best non-STILL move
+                bool all_forbidden = true;
+                for (size_t d = 0; d < ALL_CARDINALS.size(); ++d) {
+                    if (!is_move_forbidden(ship_pos, ALL_CARDINALS[d])) {
+                        all_forbidden = false;
+                        break;
+                    }
+                }
+
+                if (all_forbidden && is_move_forbidden(ship_pos, Direction::STILL)) {
+                    // Find best escape direction
+                    Direction best_dir = Direction::NORTH;
+                    int best_dominance = -999;
+
+                    for (size_t d = 0; d < ALL_CARDINALS.size(); ++d) {
+                        Direction dir = ALL_CARDINALS[d];
+                        Position target = normalize(ship_pos.directional_offset(dir));
+                        int dom = at(target).dominance_score;
+                        if (dom > best_dominance) {
+                            best_dominance = dom;
+                            best_dir = dir;
                         }
                     }
-                }
 
-                annotations_[y][x].dominance = ally_count - enemy_count;
-            }
-        }
-    }
-
-    double AnnotationMap::apply_exponential_blur(int x, int y, double decay) const {
-        double sum = 0.0;
-        double total_weight = 0.0;
-
-        int blur_radius = 3;
-
-        for (int dy = -blur_radius; dy <= blur_radius; ++dy) {
-            for (int dx = -blur_radius; dx <= blur_radius; ++dx) {
-                Position neighbor = map_->normalize(Position(x + dx, y + dy));
-                int halite = map_->at(neighbor)->halite;
-
-                double distance = std::sqrt(dx * dx + dy * dy);
-                double weight = std::pow(decay, distance);
-
-                sum += halite * weight;
-                total_weight += weight;
-            }
-        }
-
-        return (total_weight > 0) ? sum / total_weight : 0.0;
-    }
-
-    void AnnotationMap::calculate_attraction_field(const Game& game) {
-        const double THRESHOLD = 290.0;
-
-        for (int y = 0; y < map_->height; ++y) {
-            for (int x = 0; x < map_->width; ++x) {
-                double blurred = apply_exponential_blur(x, y, 0.75);
-                annotations_[y][x].attraction = (blurred > THRESHOLD) ? blurred : 0.0;
-            }
-        }
-    }
-
-    void AnnotationMap::calculate_inspiration(const Game& game) {
-        const int INSPIRATION_RADIUS = constants::INSPIRATION_RADIUS;
-        const int INSPIRATION_SHIP_COUNT = constants::INSPIRATION_SHIP_COUNT;
-
-        for (int y = 0; y < map_->height; ++y) {
-            for (int x = 0; x < map_->width; ++x) {
-                Position center(x, y);
-
-                int enemy_count = 0;
-
-                for (const auto& player : game.players) {
-                    if (player->id == game.me->id) continue;
-
-                    for (const auto& ship_pair : player->ships) {
-                        if (manhattan_distance(center, ship_pair.second->position) <= INSPIRATION_RADIUS) {
-                            enemy_count++;
-                        }
-                    }
-                }
-
-                annotations_[y][x].is_inspired = (enemy_count >= INSPIRATION_SHIP_COUNT);
-            }
-        }
-    }
-
-    void AnnotationMap::mark_enemy_reach(const Game& game) {
-        for (const auto& player : game.players) {
-            if (player->id == game.me->id) continue;
-
-            for (const auto& ship_pair : player->ships) {
-                Position enemy_pos = ship_pair.second->position;
-
-                /// Mark neighbouring cells reachable by enemy
-                for (const Position& neighbor : get_neighbors(enemy_pos)) {
-                    annotations_[neighbor.y][neighbor.x].enemy_can_reach_next_turn = true;
+                    // Clear all forbidden flags and only forbid STILL
+                    cells_[y][x].forbidden_moves.reset();
+                    set_move_forbidden(ship_pos, Direction::STILL);
                 }
             }
         }
     }
 
-    void AnnotationMap::mark_path(const std::vector<Position>& path, bool will_mine_at_end) {
+    void AnnotationMap::mark_path(const std::vector<Position>& path,
+        bool mark_last_for_mining,
+        int turn_offset) {
         for (size_t i = 0; i < path.size() && i < 64; ++i) {
-            const Position& pos = path[i];
-            annotations_[pos.y][pos.x].occupied_turns |= (1ULL << i);
+            Position norm = normalize(path[i]);
+            int turn = turn_offset + static_cast<int>(i);
+            if (turn < 64) {
+                cells_[norm.y][norm.x].occupation_timeline |= (1ULL << turn);
+            }
         }
 
-        if (will_mine_at_end && !path.empty()) {
-            const Position& end = path.back();
-            annotations_[end.y][end.x].will_be_mined = true;
+        if (mark_last_for_mining && !path.empty()) {
+            Position last = normalize(path.back());
+            cells_[last.y][last.x].marked_for_mining = true;
         }
     }
 
-    bool AnnotationMap::is_occupied_at_turn(const Position& pos, int turn_offset) const {
-        if (turn_offset >= 64) return false;
-        return (annotations_[pos.y][pos.x].occupied_turns & (1ULL << turn_offset)) != 0;
+    bool AnnotationMap::is_move_forbidden(const Position& pos, Direction direction) const {
+        Position norm = normalize(pos);
+        int idx = get_direction_index(direction);
+        return cells_[norm.y][norm.x].forbidden_moves[idx];
     }
 
-    std::set<Direction> AnnotationMap::get_forbidden_moves(const std::shared_ptr<Ship>& ship, const Game& game) const {
-        std::set<Direction> forbidden;
+    void AnnotationMap::set_move_forbidden(const Position& pos, Direction direction) {
+        Position norm = normalize(pos);
+        int idx = get_direction_index(direction);
+        cells_[norm.y][norm.x].forbidden_moves[idx] = true;
+    }
 
-        Position current = ship->position;
-        int num_players = static_cast<int>(game.players.size());
-        int dominance_threshold = (num_players == 2) ? -1 : 0;
+    void AnnotationMap::recalculate_forbidden_moves(GameMap& game_map, PlayerId my_id, int num_players) {
+        // Recalculate after path marking
+        initialize_forbidden_moves(game_map, my_id, num_players);
+    }
 
-        /// Test every direction
-        std::vector<Direction> all_directions = {
-            Direction::NORTH, Direction::SOUTH, Direction::EAST, Direction::WEST, Direction::STILL
-        };
-
-        for (Direction dir : all_directions) {
-            Position target = current;
-
-            if (dir != Direction::STILL) {
-                switch (dir) {
-                case Direction::NORTH: target.y--; break;
-                case Direction::SOUTH: target.y++; break;
-                case Direction::EAST:  target.x++; break;
-                case Direction::WEST:  target.x--; break;
-                default: break;
-                }
-                target = map_->normalize(target);
-            }
-
-            const CellAnnotation& cell = at(target);
-
-            /// Forbidden if enemy can reach & low dominance
-            if (cell.enemy_can_reach_next_turn && cell.dominance <= dominance_threshold) {
-                forbidden.insert(dir);
-            }
+    int AnnotationMap::get_direction_index(Direction dir) const {
+        switch (dir) {
+        case Direction::NORTH: return 0;
+        case Direction::SOUTH: return 1;
+        case Direction::EAST: return 2;
+        case Direction::WEST: return 3;
+        case Direction::STILL: return 4;
+        default: return 4;
         }
-
-        /// If all moves are forbidden except STILL, allow movement into highest dominance cell
-        if (forbidden.size() >= 4) {
-            /// Find neighbours with highest dominance
-            Direction best_dir = Direction::NORTH;
-            int best_dominance = -999;
-
-            for (Direction dir : {Direction::NORTH, Direction::SOUTH, Direction::EAST, Direction::WEST}) {
-                Position target = current;
-                switch (dir) {
-                case Direction::NORTH: target.y--; break;
-                case Direction::SOUTH: target.y++; break;
-                case Direction::EAST:  target.x++; break;
-                case Direction::WEST:  target.x--; break;
-                default: break;
-                }
-                target = map_->normalize(target);
-
-                int dom = at(target).dominance;
-                if (dom > best_dominance) {
-                    best_dominance = dom;
-                    best_dir = dir;
-                }
-            }
-
-            forbidden.clear();
-            // Keep only if allowed
-            for (Direction dir : all_directions) {
-                if (dir != best_dir && dir != Direction::STILL) {
-                    forbidden.insert(dir);
-                }
-            }
-        }
-
-        return forbidden;
     }
 
 } // namespace hlt
