@@ -9,7 +9,8 @@ set vcvarsall_location_2="%ProgramFiles%\Microsoft Visual Studio\2017\Community\
 set vcvarsall_location_3="%ProgramFiles(x86)%\Microsoft Visual Studio 14.0\VC\vcvarsall.bat"
 set vcvarsall_location_4="%ProgramFiles%\Microsoft Visual Studio 14.0\VC\vcvarsall.bat"
 set vcvarsall_location_5="C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvarsall.bat"
-set vcvarsall_location_count=5
+set vcvarsall_location_6="C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvarsall.bat"
+set vcvarsall_location_count=6
 
 for /L %%i in (!vcvarsall_location_count!, -1, 1) do (
     set vcvarsall_location_candidate=!vcvarsall_location_%%i!
@@ -37,7 +38,7 @@ call !vcvarsall_location! !vcvarsall_architecture!
 
 mkdir obj 2> nul
 
-cl.exe /FeMyBot.exe /std:c++14 /O2 /MT /EHsc /I . /Fo.\obj\ ^
+cl.exe /FeColonIA.exe /std:c++14 /O2 /MT /EHsc /I . /I .\hlt /Fo.\obj\ ^
  /D_USE_MATH_DEFINES ^
  .\hlt\command.cpp ^
  .\hlt\constants.cpp ^
@@ -47,4 +48,9 @@ cl.exe /FeMyBot.exe /std:c++14 /O2 /MT /EHsc /I . /Fo.\obj\ ^
  .\hlt\log.cpp ^
  .\hlt\player.cpp ^
  .\hlt\ship.cpp ^
+ .\HaliteAI\annotation_map.cpp ^
+ .\HaliteAI\collision_policy.cpp ^
+ .\HaliteAI\dropoff_policy.cpp ^
+ .\HaliteAI\planning_strategy.cpp ^
+ .\HaliteAI\spawn_policy.cpp ^
  .\MyBot.cpp ^

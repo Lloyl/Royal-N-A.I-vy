@@ -1,0 +1,191 @@
+Introduction
+
+The Halite 3 AI competition is now over, and after some hard work over the past months I finally managed to take the 3rd place. To be honest, I am leaving this behind with a bit of disappointment. Not necessarily because of the result per se, but because I do not feel as satisfied with how my bot turned out to be this year. It did not feel like I had a good enough grasp on the game strategy and what was going on in general in order to perform better. I still learned quite a few things along the way, and hope to properly share some of them in this postmortem.
+
+In case you have not participated, I strongly recommend getting acquainted with the game rules first. Don't worry, they are easy to grasp within a few minutes.
+
+High level bot overview
+
+To get a better idea of all the parts involved, here is what happens on a high level every game turn:
+
+    Build an annotation map out of the current game state.
+    Perform a planning strategy, where turtles seek different goals and coordinate their assignment.
+    Execute the spawn policy, to determine whether to spawn a new turtle or not.
+    Execute the dropoff policy, to determine whether and where to build a dropoff.
+    Execute the collision policy, which ensures no self collision ever happen, with the exception of end-game deposit.
+
+Like last year I aimed to make my bot stateless. In other words, you should be able to give any game state to the bot with no prior context and have it work properly. Unfortunately, I have not been able to get away with it this time, and had to keep two states over the whole game, as I could not find good stable heuristics for them:
+
+    A delivery state for each turtle, indicating whether it should head to a dropoff.
+    The next desired dropoff location, if one has been found before.
+
+Annotation map
+
+The first thing the bot does at each turn is to precompute a bunch of information from the given game state. This information is then used in a bunch of places to make a lot of decisions and computations easier.
+Attraction field
+
+Using the current halite of the map, an approximation called an attraction field is built in order to have a better idea of which sections of the map are more important to mine at. This is done by first applying an exponential blur, followed by a threshold value under which the halite is ignored. As you can see from the different stages below, the end result gives all the important areas of the map to focus on in a high level perspective.
+
+Current map Blurred map Threshold map
+Dominance areas
+
+It is often important to avoid certain dominated areas of the map that are populated by many enemies. There are many reasons for that: these zones are likely to be mined out in the near future, and investing in those areas may make your turtles trapped. In order to identify those, each cell contains the number of allied and enemy turtles that can be found in a given tile radius. Subtracting those gives a dominance score, where a bigger negative amount indicates a bigger threat.
+
+I am mainly using 3 different radius used to compute 3 different types of dominance area: 3, 5 and 10. Here is an example of the middle one:
+
+Current map Dominance map
+Forbidden moves
+
+When enemy turtles are very close to allied ones, it is crucial not to play certain risky moves to avoid bad situations. Each allied turtle has a flag for each move (including staying still) telling whether it is allowed or not. A move is forbidden if both these conditions are met:
+
+    An enemy turtle can move there.
+    The close dominance is below or equal a certain value (-1 in 2p, 0 in 4p).
+
+If all moves are forbidden, then we start over to find a best move other than staying still. The reasoning for that is simple. If a turtle does not want a collision, there are higher chances of survival if it moves away than if it stays still. It will therefore pick the neighbor cell with the highest allied dominance, so that if a collision does occur, the chances of recovering the cargo are higher.
+
+If for any reason only one move remains allowed for a turtle, a reservation of that cell takes place. In other words, only that turtle will be allowed to occupy that cell in the next turn, so all other turtles will also see that cell as being forbidden. No special care is given if the same cell has to be reserved by more than one turtle, so it is arbitrarily given out to one.
+Path marking
+
+For reasons that will be better explained later, every time a turtle is assigned a path, a path marking update takes place inside the annotation map to keep track of some information.
+
+First, each cell contains a 64-bit bitfield to indicate if a cell will be occupied by an allied turtle in a future planned turn (up to 64 turns ahead).
+
+When this update takes place, if a path contains a harvesting move (by staying still), it will also mark the cell as being harvested. In some strategies, it will prevent other turtles from attempting to target (or harvest) the same spot. In others, it will also inform of the remaining halite post harvesting.
+
+Forbidden moves are also recomputed every time a path is marked, as newly occupied cells can have repercussions on allowed moves and subsequent reservations.
+Other information stored
+
+    The inspiration status of each cell.
+    If a cell contains an enemy turtle.
+    Cells that can be reached by an enemy turtle on next turn, while paying attention if the turtle can actually move.
+    Manhattan distance to closest ally/enemy turtle/dropoff.
+
+Planning strategy
+
+The backbone of the bot is located here. This entire phase is about assigning a role, goal and path to each turtle. Each possible role is treated sequentially by priority as well as rules for a turtle to be admissible.
+
+Every turtle that can accomplish a role will add its path along with its score to a list of candidates, defined as a turtle, its desired path and score. This list is sorted by score and each candidate is processed in that order, greedily assigning the path to the given turtle, marking that path in the annotation map until a conflict occurs. A conflict happens when:
+
+    A path tries to harvest a cell that was already marked for harvest by a previous path assigned during processing.
+    A path tries to occupy a cell that is already occupied by a previous path assigned during processing.
+
+When a conflict happens, this candidate is invalidated, as well as any path that also triggers a conflict. Those paths are then recomputed for those turtles, added back to the list (if a new one can be found), sorted again, and the process restarts from that point.
+
+As a reminder, each role is treated sequentially in this order, and all its candidates are processed before going to the next one. If a turtle gets assigned to one, it will ignore the others below.
+End-of-game delivery role
+
+This is only triggered when less than 100 turns remain in a game. It will search for a delivery path for every turtle on the whole map using Dijkstra's algorithm, ending when a dropoff is found. If that path finishes with less than 20 turns remaining in the game (to give some buffer), it will be added to the list of candidates. Those candidates are scored by the least time to execute.
+Delivery role
+
+If a turtle has a cargo of more than 990 halite, it will be flagged for delivery. Once flagged, it will exclusively keep accomplishing this role until its energy reaches zero, which assumes a completed delivery. Every turtle searches and adds its delivery path as a candidate like done above, scored by the least time to execute.
+
+It is important to prioritize delivering over anything else. The reasoning for that is mostly seen when you notice heavy traffic near the dropoffs. If the turtles going out of the dropoff keep interfering with other deliveries (because of path marking), it will cause even more congestion instead of doing more useful stuff like mining more halite. So deliveries always have priority.
+Local harvesting role
+
+A depth-first search of all paths traversing at most X cells from the source turtle is done. On every cell (including the one it starts from), it will simulate mining from it until it falls below a given threshold (including current inspiration). It will also use the halite value remaining on the cell after considering previous turtles harvesting from it. On every turn where the turtle has enough cargo, it will score the path taken so far with this formula:
+
+score = cargo - haliteBurnedToLeaveCell - (pathCost + deliveryDistance) * timePenalty
+
+The path cost (along with pathfinding) will be explained later. The path that gave the highest score (if having the required minimum cargo) is then submitted in the candidate list.
+
+The reasoning of this role is to favor immediately harvesting the turtle surroundings, but only if it's really worth it. If the turtle is on its way to an important location (see global harvesting), it will only be distracted by halite on its way if it gets somewhat close to full cargo, and only if it is at a good rate.
+
+That leaves a few constants to be defined, namely minEnergy, minCargo, maxDist and timePenalty. My original reasoning was to successively try different combination in layers to favor certain styles of mining, such as going straight for higher concentrations of halite (e.g. having a layer with high minEnergy first, then a lower one).
+
+As the competition progressed, I noticed that after all, maybe just having a single layer with better calibration performs better. However, I also ended up introducing a priority layer, where at first only cells with inspiration are considered for harvesting, which yielded a massive improvement. It makes the turtle chase for local inspiration rather than good mining, which is what 4p games are all about. It did not do much good in 2p however, so it only was activated in 4p.
+
+I am also using a different set of constants between 4p and 2p, as it is important to mine quicker in 4p, even if less efficient.
+
+For those interested in the gritty details, the layer constants were, processed in column order:
+	4p inspiration layers (3x) 	4p mining layer 	2p mining layer
+minEnergy 	85 	128 	85
+minCargo 	550 	562 	390
+maxDist 	1,2,3 	3 	3
+timePenalty 	30 	30 	17.5
+Global harvesting role
+
+If a turtle fails to meet the criteria for harvesting its surroundings, it must then look for a good area of the map to navigate towards, unless it's already close to max capacity (800). This is done by looking at the attraction field built in the annotation map.
+
+The Dijkstra algorithm is used to search the entire map starting from a turtle. Every cell that is reached is considered for scoring if it has the necessary attraction value to meet the threshold defined before, and is not already marked for harvesting.
+
+score = attraction - pathCost * timePenalty
+
+It has proven to be typically bad to consider inspiration in the attraction value. The reasoning is this search is used mostly for long paths, and by the time it gets to an inspired area, chances are it's either mined out or the turtles have moved out.
+
+One notable exception is in 2p, where my strategy is much more aggressive with collisions. For that reason, attraction values are significantly boosted (1.5x pre blur, 1.6x post blur) to make turtles seek out the enemy much earlier than otherwise.
+
+The path to the cell with the highest score, if it exists, is then returned and scored according to the time to execute. It is also appended by a harvest move (standing still) in order to properly mark the destination as "harvested", and prevent other turtles from targeting the same destination. That trick is also done in general to prevent a target cell to be targeted by more than one turtle.
+
+Once again, some constants for the interested:
+	2p 	4p
+expBlur 	0.623 	0.75
+minAttraction 	205 	290
+
+Note that the higher blur and lower attraction threshold in 2p has an interesting side effect. Halite dropped in a single cell as a result of a collision will act as a major attraction beacon to commit nearby turtles to a fight, making the bot very aggressive.
+Greedy harvesting role (with attack)
+
+If a turtle fails to find global harvesting, it will reuse the same global search with a different scoring.
+
+score = min(energy * (cellInspired ? inspiredFactor : 1), (MAX_CARGO - cargo) * 4) / (pathCost + 1)
+
+The inspiredFactor constant (1.7 in 2p, 8.0 in 4p) is not meant to simulate harvesting under inspiration, but to favor inspired cells and indirectly enemy proximity. The energy value is capped to the maximum value to get the turtle full in one turn, so it avoids further away halite cells that exceed what it needs.
+
+An interesting twist here is if the cell contains an enemy turtle, and the small dominance value is above the value of a forbidden move, the value of the enemy's cargo is added to energy. This makes turtles seek out collisions when there's nothing better to do, and only if it's under a zone that is well controlled enough.
+
+It would be fair to mention here that this originated as a dirty hack to test out endgame attack behavior and its effect on final score. I intended to formulate an explicit attack role eventually, but it worked so well it got relegated near the bottom of my TODO list, and I did not have time to revisit this. In hindsight this may have been a mistake, as more deliberate attacks could have been much more efficient here.
+
+Once again, those candidate paths are sorted by travel time.
+Last resort role
+
+If the turtle fails to get assigned to any role, and has enough cargo (800), it gets flagged for delivery and a second delivery pass is done the same way as the first one. Otherwise it just waits.
+Pathfinding and path costs
+
+As was mentioned multiple times, almost all pathfinding and searches are accomplished using Dijkstra's algorithm, with the notable exception of local harvesting. In any case, navigation, pathing and path cost are all done with these rules.
+
+First of all, navigating from one cell to another is done using the game rules regarding harvesting and burning. This means if a turtle is on a cell with not enough cargo to move, it will pause on that cell to harvest its content before proceeding. This goes for any future move as well.
+
+On the first move, if the turtle lands on a cell that is forbidden, that search branch gets cancelled. The same goes if the turtle stays on a cell that is forbidden, or occupied by a previous turtle that marked its path.
+
+If a turtle wants to move to another cell that is already occupied, it can stay on its current cell the number of turns required before it's freed. However, if during that wait its own cell becomes occupied, that search branch gets cancelled.
+
+The path cost is first and foremost measured in number of turns, however a number of additional penalties can be applied to each turn, meaning that not all turns are worth 1 in cost.
+
+    The amount of halite burned when moving is divided by 1000 and added to the cost.
+    If the medium dominance value in the cell is <= -5, the cost is increased by dominance / -5 * penaltyDominance. penaltyDominance is 2.6 in 2p and 3.2 in 4p. Note this is an integer division, to give more contrast in progressive areas of enemy occupation density.
+    If an enemy is currently found nearby, a penalty of 0.55 in 2p and 3.5 in 4p is added. Again, more aggressivity is preferred in 2p.
+    If in paranoid mode (only used for preserving cargo in end-of-game delivery), add 10 if the first move has an enemy nearby.
+    If on an allied dropoff, add 3. This has no impact when delivering, and prevent from unnecessarily hogging the dropoff otherwise.
+
+This "distortion" of time makes turtles choose much more interesting paths than straightforward ones, when necessary.
+Spawn policy
+
+Long story short, I spent a lot of time tinkering and playing around with different metrics to figure out the optimal spawning. Unfortunately, this was all ultimately defeated by a round of simplification that worked out better with very simple rules for deciding when to spawn instead.
+
+    If there is enough halite in storage.
+    If there is more than X turns left in the game (113 to 150 in 2p, 200 in 4p).
+    If there is more than 33% halite left in the map.
+
+That's it. No bells and whistles. It works™.
+Dropoff policy
+
+Once the planning round is done, the whole map is analyzed to figure out if a good dropoff spot can be found. First, enough halite must be in storage, including future deliveries up to 16 turns ahead. It can override a spawn decision if the need arises to save up. Only those cells are up for consideration as dropoff:
+
+    That cell is more than minDist away from an allied dropoff.
+    In large maps (56 and 64), that cell must have a medium dominance value above -5.
+    There are at least minTurtles that are mining, intending to mine, or currently delivering in a radius of minTurtlesRadius.
+    There is at least minHalite found in a radius of minHaliteRadius.
+
+The cell having the most halite in minHaliteRadius meeting this criteria is targeted for building a dropoff. The closest turtle is chosen to head there and build a dropoff as soon as possible. Turtles that are in delivery role can consider going to this new dropoff before it is built, but only if they are not required to deliver their cargo in order to build the dropoff.
+
+All these constants have been painstakingly calibrated for all game modes and map sizes, so for brevity's sake, and as I do not think much insight can be gained from those, I will omit their values.
+
+There is a lot of very small details in getting this working right, especially regarding expected future income, but I also doubt it's of much interest detailing those.
+Collision policy
+
+This is mostly used as a last resort, in case for some reason the planning and path assignment fails to take something into consideration, and would cause a self collision. Those cases were typically identified as problematic and logged as such, and as time went on, their number dropped drastically. Nonetheless, it's always good to have this to act as a safety net.
+
+Every turtle gets a desired direction according to its current path. Cycles (including swaps) are detected and allowed by managing a very simple linked list pointing to other turtles. Once this is done, turtles try sequentially to do their move, with their final destination marked on the map. If a conflict occurs, it stays idle instead, potentially rollbacking a chain of turtles that wanted its current spot.
+
+Every successful move gives the turtle an effective direction, which is then used to output the final move back to the engine.
+
+There is one crucial exception here. If there is less than 20 turns remaining in the game, it will ignore any collisions occurring at allied dropoffs to maximize delivery speed.
