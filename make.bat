@@ -38,7 +38,7 @@ call !vcvarsall_location! !vcvarsall_architecture!
 
 mkdir obj 2> nul
 
-cl.exe /FeColonIA.exe /std:c++14 /O2 /MT /EHsc /I . /I .\hlt /Fo.\obj\ ^
+cl.exe /FeColonIA.exe /std:c++17 /O2 /MT /EHsc /I . /I .\hlt /I .\HaliteAI /Fo.\obj\ ^
  /D_USE_MATH_DEFINES ^
  .\hlt\command.cpp ^
  .\hlt\constants.cpp ^

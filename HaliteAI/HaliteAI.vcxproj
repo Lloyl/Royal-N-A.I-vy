@@ -164,12 +164,6 @@
     <ClCompile Include="..\hlt\player.cpp" />
     <ClCompile Include="..\hlt\ship.cpp" />
     <ClCompile Include="..\MyBot.cpp" />
-    <ClCompile Include="annotation_map.cpp" />
-    <ClCompile Include="collision_policy.cpp" />
-    <ClCompile Include="dropoff_policy.cpp" />
-    <ClCompile Include="dropoff_policy.hpp" />
-    <ClCompile Include="planning_strategy.cpp" />
-    <ClCompile Include="spawn_policy.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\hlt\command.hpp" />
@@ -187,10 +181,6 @@
     <ClInclude Include="..\hlt\ship.hpp" />
     <ClInclude Include="..\hlt\shipyard.hpp" />
     <ClInclude Include="..\hlt\types.hpp" />
-    <ClInclude Include="annotation_map.hpp" />
-    <ClInclude Include="collision_policy.hpp" />
-    <ClInclude Include="planning_strategy.hpp" />
-    <ClInclude Include="spawn_policy.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
